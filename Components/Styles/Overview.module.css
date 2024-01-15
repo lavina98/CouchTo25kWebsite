@@ -1,0 +1,45 @@
+.overviewDiv {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    flex-wrap: wrap;
+}
+
+.pausedDiv, .stoppedDiv {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+}
+
+.pausedDiv button {
+    margin: 5px;
+    width: 200px;
+}
+
+.resumeButton {
+    width: 200px;
+    height: 100%;
+    font-size: 20px;
+    font-weight: bold;
+    background-color: green;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.stopButton {
+    width: 200px;
+    height: 100%;
+    font-size: 20px;
+    font-weight: bold;
+    background-color: red;
+    color: black;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}

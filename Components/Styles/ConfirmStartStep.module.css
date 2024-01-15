@@ -1,0 +1,42 @@
+.confirmStartStepDiv {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    margin-top: 20px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    
+}
+
+.confirmStartStepDiv div {
+    margin: 10px;
+}
+
+.confirmStartStepDiv button {
+    margin:5px;
+}
+
+.yesButton {
+    width: 200px;
+    height: 100%;
+    font-size: 20px;
+    font-weight: bold;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.noButton {
+    width: 200px;
+    height: 100%;
+    font-size: 20px;
+    font-weight: bold;
+    background-color: #f44336;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
