@@ -11,7 +11,7 @@ export default function History() {
         async function getHistory() {
             const history = await fetch('api/history');
             let exerciseJson = await history.json() as Exercise[];
-            exerciseJson = exerciseJson.sort((a, b) => new Date(a.date ??0 ).getTime() - new Date(b.date ??0 ).getTime());
+            exerciseJson = exerciseJson.sort((a, b) => new Date(b.date ??0 ).getTime() - new Date(a.date ??0 ).getTime());
             setExerciseHistory(exerciseJson);
         }
         getHistory()
