@@ -1,6 +1,7 @@
 import { State } from "@/Models/Enum";
-import {  useEffect, useState } from "react";
+import {  useEffect, useState, useRef } from "react";
 import styles from './Styles/InProgressStep.module.css'
+import { useWakeLock } from './useWakeLock';
 
 
 export interface InProgressStepProps {
@@ -15,55 +16,92 @@ export interface InProgressStepProps {
 }
 
 export default function InProgressStep(props: InProgressStepProps) {
-    const [seconds, setSeconds] = useState(props.completedTimeInSeconds);
+    const { completedTimeInSeconds, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange } = props;
+    const [seconds, setSeconds] = useState(completedTimeInSeconds);
     const [intervalId, setIntervalId] = useState<NodeJS.Timeout>();
+    const startTimeRef = useRef<number>(Date.now() - (completedTimeInSeconds * 1000));
+    const [isActive, setIsActive] = useState(true);
+    
+    // Keep screen awake during workout
+    useWakeLock(isActive);
 
     const convertSecondsToFormatedTime = (seconds: number): string =>{
         return (`${Math.floor(seconds / 60)} : ${seconds % 60}`);
     }
 
     const onButtonClick = (state: State) => {
+        setIsActive(false);
         clearInterval(intervalId);
-        props.setCompletedTimeInSeconds(seconds);
-        props.onStateChange(state);
+        setCompletedTimeInSeconds(seconds);
+        onStateChange(state);
     };
 
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setSeconds(seconds => seconds + 1);          
-        }, 1000);
-        setIntervalId(interval);
-        return () => clearInterval(intervalId); // This represents the unmount function, in which you need to clear your interval to prevent memory leaks.
-    }, []);
+    // Function to calculate elapsed time based on actual time
+    const updateTimer = () => {
+        const now = Date.now();
+        const elapsed = Math.floor((now - startTimeRef.current) / 1000);
+        setSeconds(elapsed);
+        return elapsed;
+    };
 
+    // Handle page visibility changes (when phone is locked/unlocked)
     useEffect(() => {
-        async function playAudio(fileName:string) {
-            const audio = new Audio(fileName);
-            await audio.play();
-        }
-
-        if (seconds >= props.totalTimeInSeconds) {
-            playAudio('./complete.mp3').then(() => {
-                clearInterval(intervalId);
-                props.setCompletedTimeInSeconds(seconds);
-                props.onStateChange(State.Stopped);
-            });
-       
-        }
-        else {
-            if(seconds % props.lapTimeInSeconds == 0) {
-                playAudio('./run.mp3');
+        const handleVisibilityChange = () => {
+            if (!document.hidden && isActive) {
+                // Page became visible again, update timer immediately
+                updateTimer();
             }
-            else if(seconds % props.lapTimeInSeconds == props.runTimeInSeconds) {
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [isActive]);
+
+    // Main timer effect
+    useEffect(() => {
+        if (!isActive) return;
+
+        const interval = setInterval(() => {
+            const currentSeconds = updateTimer();
+            
+            // Check if workout is complete
+            if (currentSeconds >= totalTimeInSeconds) {
+                setIsActive(false);
+                clearInterval(interval);
+                playAudio('./complete.mp3').then(() => {
+                    setCompletedTimeInSeconds(currentSeconds);
+                    onStateChange(State.Stopped);
+                });
+                return;
+            }
+
+            // Play audio cues
+            const lapProgress = currentSeconds % lapTimeInSeconds;
+            if (lapProgress === 0) {
+                playAudio('./run.mp3');
+            } else if (lapProgress === runTimeInSeconds) {
                 playAudio('./walk.mp3');
             }
+        }, 1000);
+
+        setIntervalId(interval);
+        return () => clearInterval(interval);
+    }, [isActive, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange]);
+
+    // Audio playback function
+    async function playAudio(fileName: string) {
+        try {
+            const audio = new Audio(fileName);
+            await audio.play();
+        } catch (error) {
+            console.log('Audio playback failed:', error);
         }
-    }, [seconds, intervalId, props.totalTimeInSeconds]);
+    }
 
     return (
         <div className={styles.inProgressStepDiv}> 
-            <div> Time:{convertSecondsToFormatedTime(seconds)} / {convertSecondsToFormatedTime(props.totalTimeInSeconds)}</div>
-            <div>Laps: {Math.floor(seconds / props.lapTimeInSeconds)} / {props.totalLaps}</div>
+            <div> Time:{convertSecondsToFormatedTime(seconds)} / {convertSecondsToFormatedTime(totalTimeInSeconds)}</div>
+            <div>Laps: {Math.floor(seconds / lapTimeInSeconds)} / {props.totalLaps}</div>
             <button className={styles.pauseButton} onClick={(e) => {onButtonClick(State.Paused); }}>Pause</button>
             <button className={styles.stopButton} onClick={(e) => {onButtonClick(State.Stopped);}}>Stop</button>
         </div>
