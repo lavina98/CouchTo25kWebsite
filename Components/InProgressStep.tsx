@@ -2,6 +2,7 @@ import { State } from "@/Models/Enum";
 import {  useEffect, useState, useRef } from "react";
 import styles from './Styles/InProgressStep.module.css'
 import { useWakeLock } from './useWakeLock';
+import { BackgroundAudioManager } from './BackgroundAudioManager';
 
 
 export interface InProgressStepProps {
@@ -21,9 +22,22 @@ export default function InProgressStep(props: InProgressStepProps) {
     const [intervalId, setIntervalId] = useState<NodeJS.Timeout>();
     const startTimeRef = useRef<number>(Date.now() - (completedTimeInSeconds * 1000));
     const [isActive, setIsActive] = useState(true);
+    const audioManagerRef = useRef<BackgroundAudioManager | null>(null);
     
     // Keep screen awake during workout
     useWakeLock(isActive);
+
+    // Initialize audio manager
+    useEffect(() => {
+        audioManagerRef.current = new BackgroundAudioManager();
+        audioManagerRef.current.initialize();
+        
+        return () => {
+            if (audioManagerRef.current) {
+                audioManagerRef.current.destroy();
+            }
+        };
+    }, []);
 
     const convertSecondsToFormatedTime = (seconds: number): string =>{
         return (`${Math.floor(seconds / 60)} : ${seconds % 60}`);
@@ -57,17 +71,35 @@ export default function InProgressStep(props: InProgressStepProps) {
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }, [isActive]);
 
-    // Main timer effect
+    // Main timer effect with audio scheduling and background support
     useEffect(() => {
         if (!isActive) return;
 
-        const interval = setInterval(() => {
+        // Start background workout tracking
+        if (audioManagerRef.current) {
+            audioManagerRef.current.startBackgroundWorkout({
+                startTime: startTimeRef.current,
+                isActive: true,
+                lapTimeInSeconds,
+                runTimeInSeconds,
+                totalTimeInSeconds
+            });
+        }
+
+        // Play initial "run" audio when workout starts
+        if (completedTimeInSeconds === 0) {
+            playAudio('./run.mp3');
+        }
+
+        let timeoutId: NodeJS.Timeout;
+        let lastCheckedSecond = completedTimeInSeconds;
+
+        const scheduleNextAudioCue = () => {
             const currentSeconds = updateTimer();
             
             // Check if workout is complete
             if (currentSeconds >= totalTimeInSeconds) {
                 setIsActive(false);
-                clearInterval(interval);
                 playAudio('./complete.mp3').then(() => {
                     setCompletedTimeInSeconds(currentSeconds);
                     onStateChange(State.Stopped);
@@ -75,26 +107,57 @@ export default function InProgressStep(props: InProgressStepProps) {
                 return;
             }
 
-            // Play audio cues
-            const lapProgress = currentSeconds % lapTimeInSeconds;
-            if (lapProgress === 0) {
-                playAudio('./run.mp3');
-            } else if (lapProgress === runTimeInSeconds) {
-                playAudio('./walk.mp3');
+            // Check for missed audio cues (in case we were locked)
+            for (let sec = lastCheckedSecond + 1; sec <= currentSeconds; sec++) {
+                const lapProgress = sec % lapTimeInSeconds;
+                if (lapProgress === 0 && sec > 0) {
+                    playAudio('./run.mp3');
+                } else if (lapProgress === runTimeInSeconds) {
+                    playAudio('./walk.mp3');
+                }
             }
-        }, 1000);
+            lastCheckedSecond = currentSeconds;
 
-        setIntervalId(interval);
-        return () => clearInterval(interval);
-    }, [isActive, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange]);
+            // Schedule next check - use high frequency for better accuracy
+            timeoutId = setTimeout(scheduleNextAudioCue, 100);
+        };
 
-    // Audio playback function
+        // Start the audio scheduling loop
+        scheduleNextAudioCue();
+
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            // Stop background workout when component unmounts or workout stops
+            if (audioManagerRef.current) {
+                audioManagerRef.current.stopBackgroundWorkout();
+            }
+        };
+    }, [isActive, completedTimeInSeconds, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange]);
+
+    // Enhanced audio playback function using BackgroundAudioManager
     async function playAudio(fileName: string) {
-        try {
-            const audio = new Audio(fileName);
-            await audio.play();
-        } catch (error) {
-            console.log('Audio playback failed:', error);
+        if (audioManagerRef.current) {
+            await audioManagerRef.current.playAudio(fileName);
+        } else {
+            // Fallback to basic audio if manager not available
+            try {
+                const audio = new Audio(fileName);
+                audio.volume = 1.0;
+                await audio.play();
+            } catch (error) {
+                console.log('Fallback audio failed:', error);
+                
+                // Vibration fallback
+                if ('vibrate' in navigator) {
+                    if (fileName.includes('run')) {
+                        navigator.vibrate([200]);
+                    } else if (fileName.includes('walk')) {
+                        navigator.vibrate([200, 100, 200]);
+                    } else if (fileName.includes('complete')) {
+                        navigator.vibrate([500, 200, 500, 200, 500]);
+                    }
+                }
+            }
         }
     }
 

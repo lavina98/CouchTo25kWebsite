@@ -7,6 +7,7 @@
   "background_color": "#ffffff",
   "theme_color": "#000000",
   "orientation": "portrait",
+  "scope": "/",
   "icons": [
     {
       "src": "/icon-192x192.png",
@@ -20,5 +21,16 @@
     }
   ],
   "categories": ["health", "fitness", "sports"],
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+  "permissions": [
+    "background-sync",
+    "audio-playback"
+  ],
+  "background": {
+    "scripts": ["sw-enhanced.js"],
+    "persistent": true
+  },
+  "background_sync": {
+    "tag": "workout-timer"
+  }
 }
