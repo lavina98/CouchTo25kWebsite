@@ -57,17 +57,24 @@ export default function InProgressStep(props: InProgressStepProps) {
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }, [isActive]);
 
-    // Main timer effect
+    // Main timer effect with audio scheduling
     useEffect(() => {
         if (!isActive) return;
 
-        const interval = setInterval(() => {
+        // Play initial "run" audio when workout starts
+        if (completedTimeInSeconds === 0) {
+            playAudio('./run.mp3');
+        }
+
+        let timeoutId: NodeJS.Timeout;
+        let lastCheckedSecond = completedTimeInSeconds;
+
+        const scheduleNextAudioCue = () => {
             const currentSeconds = updateTimer();
             
             // Check if workout is complete
             if (currentSeconds >= totalTimeInSeconds) {
                 setIsActive(false);
-                clearInterval(interval);
                 playAudio('./complete.mp3').then(() => {
                     setCompletedTimeInSeconds(currentSeconds);
                     onStateChange(State.Stopped);
@@ -75,26 +82,73 @@ export default function InProgressStep(props: InProgressStepProps) {
                 return;
             }
 
-            // Play audio cues
-            const lapProgress = currentSeconds % lapTimeInSeconds;
-            if (lapProgress === 0) {
-                playAudio('./run.mp3');
-            } else if (lapProgress === runTimeInSeconds) {
-                playAudio('./walk.mp3');
+            // Check for missed audio cues (in case we were locked)
+            for (let sec = lastCheckedSecond + 1; sec <= currentSeconds; sec++) {
+                const lapProgress = sec % lapTimeInSeconds;
+                if (lapProgress === 0 && sec > 0) {
+                    playAudio('./run.mp3');
+                } else if (lapProgress === runTimeInSeconds) {
+                    playAudio('./walk.mp3');
+                }
             }
-        }, 1000);
+            lastCheckedSecond = currentSeconds;
 
-        setIntervalId(interval);
-        return () => clearInterval(interval);
-    }, [isActive, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange]);
+            // Schedule next check - use high frequency for better accuracy
+            timeoutId = setTimeout(scheduleNextAudioCue, 100);
+        };
 
-    // Audio playback function
+        // Start the audio scheduling loop
+        scheduleNextAudioCue();
+
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [isActive, completedTimeInSeconds, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange]);
+
+    // Audio playback function with multiple fallbacks
     async function playAudio(fileName: string) {
         try {
+            // Method 1: Regular Audio object
             const audio = new Audio(fileName);
+            audio.volume = 1.0;
+            
+            // Force audio to be treated as important
+            if ('webkitAudioContext' in window || 'AudioContext' in window) {
+                // Resume audio context if suspended
+                const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+                if (AudioContext) {
+                    const audioContext = new AudioContext();
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+                }
+            }
+            
             await audio.play();
+            
+            // Method 2: Vibration as backup notification
+            if ('vibrate' in navigator) {
+                if (fileName.includes('run')) {
+                    navigator.vibrate([200]); // Short vibration for run
+                } else if (fileName.includes('walk')) {
+                    navigator.vibrate([200, 100, 200]); // Double vibration for walk
+                } else if (fileName.includes('complete')) {
+                    navigator.vibrate([500, 200, 500, 200, 500]); // Long pattern for complete
+                }
+            }
         } catch (error) {
             console.log('Audio playback failed:', error);
+            
+            // Fallback: Just vibration if audio fails
+            if ('vibrate' in navigator) {
+                if (fileName.includes('run')) {
+                    navigator.vibrate([200]);
+                } else if (fileName.includes('walk')) {
+                    navigator.vibrate([200, 100, 200]);
+                } else if (fileName.includes('complete')) {
+                    navigator.vibrate([500, 200, 500, 200, 500]);
+                }
+            }
         }
     }
 
