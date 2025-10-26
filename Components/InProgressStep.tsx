@@ -2,6 +2,7 @@ import { State } from "@/Models/Enum";
 import {  useEffect, useState, useRef } from "react";
 import styles from './Styles/InProgressStep.module.css'
 import { useWakeLock } from './useWakeLock';
+import { BackgroundAudioManager } from './BackgroundAudioManager';
 
 
 export interface InProgressStepProps {
@@ -21,9 +22,22 @@ export default function InProgressStep(props: InProgressStepProps) {
     const [intervalId, setIntervalId] = useState<NodeJS.Timeout>();
     const startTimeRef = useRef<number>(Date.now() - (completedTimeInSeconds * 1000));
     const [isActive, setIsActive] = useState(true);
+    const audioManagerRef = useRef<BackgroundAudioManager | null>(null);
     
     // Keep screen awake during workout
     useWakeLock(isActive);
+
+    // Initialize audio manager
+    useEffect(() => {
+        audioManagerRef.current = new BackgroundAudioManager();
+        audioManagerRef.current.initialize();
+        
+        return () => {
+            if (audioManagerRef.current) {
+                audioManagerRef.current.destroy();
+            }
+        };
+    }, []);
 
     const convertSecondsToFormatedTime = (seconds: number): string =>{
         return (`${Math.floor(seconds / 60)} : ${seconds % 60}`);
@@ -57,9 +71,20 @@ export default function InProgressStep(props: InProgressStepProps) {
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }, [isActive]);
 
-    // Main timer effect with audio scheduling
+    // Main timer effect with audio scheduling and background support
     useEffect(() => {
         if (!isActive) return;
+
+        // Start background workout tracking
+        if (audioManagerRef.current) {
+            audioManagerRef.current.startBackgroundWorkout({
+                startTime: startTimeRef.current,
+                isActive: true,
+                lapTimeInSeconds,
+                runTimeInSeconds,
+                totalTimeInSeconds
+            });
+        }
 
         // Play initial "run" audio when workout starts
         if (completedTimeInSeconds === 0) {
@@ -102,51 +127,35 @@ export default function InProgressStep(props: InProgressStepProps) {
 
         return () => {
             if (timeoutId) clearTimeout(timeoutId);
+            // Stop background workout when component unmounts or workout stops
+            if (audioManagerRef.current) {
+                audioManagerRef.current.stopBackgroundWorkout();
+            }
         };
     }, [isActive, completedTimeInSeconds, totalTimeInSeconds, lapTimeInSeconds, runTimeInSeconds, setCompletedTimeInSeconds, onStateChange]);
 
-    // Audio playback function with multiple fallbacks
+    // Enhanced audio playback function using BackgroundAudioManager
     async function playAudio(fileName: string) {
-        try {
-            // Method 1: Regular Audio object
-            const audio = new Audio(fileName);
-            audio.volume = 1.0;
-            
-            // Force audio to be treated as important
-            if ('webkitAudioContext' in window || 'AudioContext' in window) {
-                // Resume audio context if suspended
-                const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-                if (AudioContext) {
-                    const audioContext = new AudioContext();
-                    if (audioContext.state === 'suspended') {
-                        await audioContext.resume();
+        if (audioManagerRef.current) {
+            await audioManagerRef.current.playAudio(fileName);
+        } else {
+            // Fallback to basic audio if manager not available
+            try {
+                const audio = new Audio(fileName);
+                audio.volume = 1.0;
+                await audio.play();
+            } catch (error) {
+                console.log('Fallback audio failed:', error);
+                
+                // Vibration fallback
+                if ('vibrate' in navigator) {
+                    if (fileName.includes('run')) {
+                        navigator.vibrate([200]);
+                    } else if (fileName.includes('walk')) {
+                        navigator.vibrate([200, 100, 200]);
+                    } else if (fileName.includes('complete')) {
+                        navigator.vibrate([500, 200, 500, 200, 500]);
                     }
-                }
-            }
-            
-            await audio.play();
-            
-            // Method 2: Vibration as backup notification
-            if ('vibrate' in navigator) {
-                if (fileName.includes('run')) {
-                    navigator.vibrate([200]); // Short vibration for run
-                } else if (fileName.includes('walk')) {
-                    navigator.vibrate([200, 100, 200]); // Double vibration for walk
-                } else if (fileName.includes('complete')) {
-                    navigator.vibrate([500, 200, 500, 200, 500]); // Long pattern for complete
-                }
-            }
-        } catch (error) {
-            console.log('Audio playback failed:', error);
-            
-            // Fallback: Just vibration if audio fails
-            if ('vibrate' in navigator) {
-                if (fileName.includes('run')) {
-                    navigator.vibrate([200]);
-                } else if (fileName.includes('walk')) {
-                    navigator.vibrate([200, 100, 200]);
-                } else if (fileName.includes('complete')) {
-                    navigator.vibrate([500, 200, 500, 200, 500]);
                 }
             }
         }
